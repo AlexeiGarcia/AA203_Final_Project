@@ -71,6 +71,7 @@ def mpc_iteration(fd: callable, Q: np.ndarray, R: np.ndarray, N: int, s_goal: np
     A_N, B_N = np.array(A_N), np.array(B_N)
     P = solve_discrete_are(A_N, B_N, Q, R)
     # P = 1e3*np.eye(n)
+    # P = np.diag([1e3, 1e3, 1e3, 1., 1., 1.])
 
     thrust_min = U[0]
     thrust_max = U[1]
@@ -119,7 +120,7 @@ m = 2                                                       # control dimension
 s0 = np.array([0., 0., 0., 0., 0., 0.])                     # initial level state
 #u0 = np.array([(quad.m_Q*quad.g/2),(quad.m_Q*quad.g/2)])   # Initial hover control assuming level attitude
 u0 = np.array([0.,0.])
-s_goal = np.array([1., 0., 0., 0., 0., 0.])                 # desired location w/ hover final velocity
+s_goal = np.array([1., 1., 0., 0., 0., 0.])                 # desired location w/ hover final velocity
 # Target hover control
 u_goal = np.array([(quad.m_Q*quad.g/2),(quad.m_Q*quad.g/2)])
 
