@@ -1,6 +1,7 @@
 # Python Packages
 import numpy as np
 import cvxpy as cvx
+from tqdm import tqdm
 import random
 from scipy.stats import multivariate_normal
 import matplotlib.pyplot as plt
@@ -33,7 +34,7 @@ def LoadedQuadEOM(s: np.ndarray, u: np.ndarray, quad):
     # 7 - phidot
 
     # control input is the left and right propeller thrusts
-    m_Q, m_p, I_yy, d, g, = quad.m_Q, quad.m_p, quad.Iyy, quad.d, quad.g
+    m_Q, m_p, I_yy, d, g, l = quad.m_Q, quad.m_p, quad.Iyy, quad.d, quad.g, quad.l
     m_tot = m_Q + m_p
 
     x, z, theta, phi = s[0], s[1], s[2], s[3]
@@ -62,7 +63,7 @@ def loaded_dynamics(s: np.ndarray, u: np.ndarray, dt: float, quad):
 
 def Jacobians(fd: callable, s: np.ndarray, u: np.ndarray, dt: float, quad):
     '''Accept vector of states and control, and output time discretized jacobian matrices'''
-    m_Q, m_p, I_yy, l = quad.m_Q, quad.m_p, quad.Iyy, quad.l
+    m_Q, m_p, I_yy, l, d = quad.m_Q, quad.m_p, quad.Iyy, quad.l, quad.d
     state_dim = s.shape[1]
     control_dim = u.shape[1]
     A_k, B_k, c_k = [], [], []
@@ -120,13 +121,13 @@ def Jacobians(fd: callable, s: np.ndarray, u: np.ndarray, dt: float, quad):
         A_k.append(A)
         B_k.append(B)
         # Additional linearization constant
-        c_k.append(fd(s_k, u_k, quad) - A @ s_k - B @ u_k)
+        c_k.append(fd(s_k, u_k, dt, quad) - A @ s_k - B @ u_k)
 
     return A_k, B_k, c_k
 
 # Generate time discretized control policy using Sequential Convex Programming
-def generate_scp_trajectory(fd: callable, P: np.ndarray, Q: np.ndarray, R: np.ndarray, N: int, s_goal: np.ndarray, 
-                        s0: np.ndarray, ρ: float, tol: float, max_iters: int, dt: float, quad):
+def generate_scp_trajectory(fd: callable, P: np.ndarray, Q: np.ndarray, R: np.ndarray, N: int, 
+                            s_goal: np.ndarray, s0: np.ndarray, tol: float, max_iters: int, dt: float, quad):
     '''Solve the quadrotor trajectory problem using SCP'''
     n = Q.shape[0]    # state dimension
     m = R.shape[0]    # control dimension
@@ -136,14 +137,14 @@ def generate_scp_trajectory(fd: callable, P: np.ndarray, Q: np.ndarray, R: np.nd
     s_bar = np.zeros((N + 1, n))
     s_bar[0] = s0
     for k in range(N):
-        s_bar[k+1] = fd(s_bar[k], u_bar[k], quad)
+        s_bar[k+1] = fd(s_bar[k], u_bar[k], dt, quad)
     
     # Do SCP until convergence or maximum number of iterations is reached
     converged = False
     obj_prev = np.inf
     prog_bar = tqdm(range(max_iters))
     for i in prog_bar:
-        s, u, obj = scp_iteration(fd, P, Q, R, N, s_bar, u_bar, s_goal, s0, ρ, dt, quad)
+        s, u, obj = scp_iteration(fd, P, Q, R, N, s_bar, u_bar, s_goal, s0, dt, quad)
         diff_obj = np.abs(obj - obj_prev)
         prog_bar.set_postfix({'objective change': '{:.5f}'.format(diff_obj)})
 
@@ -162,7 +163,7 @@ def generate_scp_trajectory(fd: callable, P: np.ndarray, Q: np.ndarray, R: np.nd
     return s, u
 
 def scp_iteration(fd: callable, P: np.ndarray, Q: np.ndarray, R: np.ndarray, N: int, s_bar: np.ndarray, 
-                  u_bar: np.ndarray, s_goal: np.ndarray, s0: np.ndarray, ρ: float, dt: float, quad):
+                  u_bar: np.ndarray, s_goal: np.ndarray, s0: np.ndarray, dt: float, quad):
     """Solve a single SCP sub-problem for the quadrotor trajectory problem."""
     A, B, c = Jacobians(fd, s_bar[:-1], u_bar, dt, quad)
     A, B, c = np.array(A), np.array(B), np.array(c)
