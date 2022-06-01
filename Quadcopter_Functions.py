@@ -49,7 +49,7 @@ def LoadedQuadEOM(s: np.ndarray, u: np.ndarray, quad):
     sdot[4] = (T1+T2) * np.sin(theta) * (m_Q + m_p * (np.cos(phi)) ** 2) / (m_Q * m_tot) + (T1+T2) * np.cos(theta) * (m_p * np.sin(phi) * np.cos(phi)) / (m_Q * m_tot) + m_p * l * (phidot) ** 2 * np.sin(phi) / m_tot
     sdot[5] = (T1+T2) * np.cos(theta) * (m_Q + m_p * (np.sin(phi)) ** 2) / (m_Q * m_tot) + (T1+T2) * np.sin(theta) * (m_p * np.sin(phi) * np.cos(phi)) / (m_Q * m_tot) - m_p * l * (phidot) ** 2 * np.cos(phi) / m_tot - g
     sdot[6] = d*(T1-T2) / I_yy - C_d*(thetadot - phidot)
-    sdot[7] = -(T1+T2) * np.sin(phi - theta) / (m_Q * l) - C_d*(phidot - thetadot)
+    sdot[7] = -(T1+T2) * np.sin(phi + theta) / (m_Q * l) - C_d*(phidot - thetadot)
 
     return sdot
 
@@ -72,13 +72,9 @@ def Jacobians(fd: callable, s: np.ndarray, u: np.ndarray, dt: float, quad):
         s_k = s[k]
         u_k = u[k]
         x, z, theta, phi, xdot, zdot, thetadot, phidot = s_k
-        T1, T2 = u_k
-        
-        C1 = (m_Q + m_p)*(T1+T2)/(m_Q*(m_Q + m_p))
-        C2 = (m_p)*(T1+T2)/(m_Q*(m_Q + m_p))
-        C3 = m_p*l/(m_Q + m_p)
-        C4 = (T1-T2)/I_yy
-        C5 = (T1+T2)/(m_Q*l)
+        T1, T2 = u_k        
+
+        m_tot = m_Q + m_p
         
         # State Jacobian
         A = np.eye(state_dim)
@@ -86,25 +82,25 @@ def Jacobians(fd: callable, s: np.ndarray, u: np.ndarray, dt: float, quad):
         A[1,5] = dt
         A[2,6] = dt
         A[3,7] = dt
-        A[4,2] = dt*((m_Q + m_p*(np.cos(phi)**2)*(T1+T2))/(m_Q*(m_Q + m_p)) * np.cos(theta) - C2*np.sin(phi)*np.cos(phi)*np.sin(theta))
-        A[4,3] = dt*((-2*m_p*np.cos(phi)*np.sin(phi))*(T1+T2)/(m_Q*(m_Q + m_p)) * np.sin(theta) + C2*np.cos(2*phi)*np.cos(theta) + C3*(phidot**2)*np.sin(phi))
-        A[4,7] = dt*(-C3*(2*phidot*np.cos(phi)))      
-        A[5,2] = dt*(-(m_Q + m_p*((np.sin(phi))**2))*(T1+T2)/(m_Q*(m_Q + m_p))*np.sin(theta) + C2*np.sin(phi)*np.cos(phi)*np.cos(theta))
-        A[5,3] = dt*((-m_p*np.sin(2*phi))*(T1+T2)/(m_Q*(m_Q + m_p))*np.cos(theta) + C2*np.cos(2*phi)*np.sin(theta) + C3*(phidot**2)*np.sin(phi))
-        A[5,7] = dt*(-(C3*2*phidot)*np.cos(phi))
+        A[4,2] = dt*(((m_Q + m_p*(np.cos(phi)**2))/(m_Q*m_tot)) * (T1+T2)*np.cos(theta) - (m_p*np.sin(phi)*np.cos(phi)/(m_Q*m_tot)) * (T1+T2) * np.sin(theta))
+        A[4,3] = dt*((-m_p*np.sin(2*phi))/(m_Q*m_tot)*(T1+T2)*np.sin(theta) + (m_p*np.cos(2*phi)/(m_Q*m_tot))*(T1+T2)*np.cos(theta) + m_p*l*(phidot**2)*np.cos(phi)/m_tot)
+        A[4,7] = dt*(2*m_p*l*phidot*np.sin(phi)/m_tot)
+        A[5,2] = dt*(-(m_Q + m_p*(np.sin(phi))**2)/(m_Q*m_tot) * (T1+T2)*np.sin(theta) + (m_p*np.sin(phi)*np.cos(phi)/(m_Q*m_tot))*(T1+T2)*np.cos(theta))
+        A[5,3] = dt*((m_p*np.sin(2*phi)/(m_Q*m_tot))*(T1+T2)*np.cos(theta) + (m_p*np.cos(2*phi)/(m_Q*m_tot))*(T1+T2)*np.sin(theta) + m_p*l*(phidot**2)*np.sin(phi)/m_tot)
+        A[5,7] = dt*(-2*m_p*l*phidot*np.cos(phi)/m_tot)
         A[6,6] = -C_d*dt
         A[6,7] = C_d*dt
-        A[7,2] = dt*(C5*np.cos(phi - theta))
-        A[7,3] = dt*(-C5*np.cos(phi - theta))
+        A[7,2] = dt*(-(T1+T2)*np.cos(phi + theta)/(m_Q*l))
+        A[7,3] = dt*(-(T1+T2)*np.cos(phi + theta)/(m_Q*l))
         A[7,6] = C_d*dt
         A[7,7] = -C_d*dt
 
-        U1 = (m_Q + m_p*(np.cos(phi)**2))*np.sin(theta)/(m_Q*(m_Q + m_p))
-        U2 = (m_p)*(np.sin(phi)*np.cos(phi)*np.cos(theta))/(m_Q*(m_Q + m_p))
-        U3 = (m_Q + m_p*(np.sin(phi)**2))*np.cos(theta)/(m_Q*(m_Q + m_p))
-        U4 = (m_p)*(np.sin(phi)*np.cos(phi)*np.sin(theta))/(m_Q*(m_Q + m_p))
+        U1 = (m_Q + m_p*(np.cos(phi)**2))*np.sin(theta)/(m_Q*m_tot)
+        U2 = m_p*np.sin(phi)*np.cos(phi)*np.cos(theta)/(m_Q*m_tot)
+        U3 = (m_Q + m_p*np.sin(phi)**2)*np.cos(theta)/(m_Q*m_tot)
+        U4 = m_p*np.sin(phi)*np.cos(phi)*np.sin(theta)/(m_Q*m_tot)
         U5 = d/I_yy
-        U6 = -np.sin(phi-theta)/(m_Q*l)
+        U6 = -np.sin(phi+theta)/(m_Q*l)
 
         # Measurement Jacobian
         B = np.zeros((state_dim, control_dim))
