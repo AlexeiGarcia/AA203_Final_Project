@@ -1,6 +1,5 @@
 # Python Packages
 import numpy as np
-import sympy as sp
 import cvxpy as cvx
 import random
 from scipy.stats import multivariate_normal
@@ -42,6 +41,7 @@ def LoadedQuadEOM(s: np.ndarray, u: np.ndarray, quad):
     T1, T2 = u
     C_d = 2
 
+    sdot = np.zeros((s.shape[0]))
     sdot[0] = xdot
     sdot[1] = zdot
     sdot[2] = thetadot
@@ -65,7 +65,7 @@ def Jacobians(fd: callable, s: np.ndarray, u: np.ndarray, dt: float, quad):
     m_Q, m_p, I_yy, l = quad.m_Q, quad.m_p, quad.Iyy, quad.l
     state_dim = s.shape[1]
     control_dim = u.shape[1]
-    A, B, c = [], [], []
+    A_k, B_k, c_k = [], [], []
 
     C_d = 2
     for k in range(s.shape[0]):
