@@ -4,6 +4,7 @@ import cvxpy as cvx
 from tqdm import tqdm
 from scipy.stats import multivariate_normal
 from copy import deepcopy
+from scipy.linalg import solve_discrete_are
 
 # unloaded 2D quadrotor object 
 class PlanarQuadrotor:
@@ -16,7 +17,7 @@ class PlanarQuadrotor:
         self.d = 0.25     # length from center of mass to propellers (m)
         self.g = 9.81     # acceleration due to gravity [m/s^2]
         self.l = 1        # pendulum length (m)
-        self.C_d = 0.
+        self.C_d = 2.
 
         # Control constraints
         self.max_thrust_per_prop = self.m_Q * self.g  # total thrust-to-weight ratio = 1.5
@@ -200,3 +201,83 @@ def scp_iteration(fd: callable, P: np.ndarray, Q: np.ndarray, R: np.ndarray, N: 
     obj = prob.objective.value
 
     return s, u, obj
+
+def mpc_iteration(fd: callable, Q: np.ndarray, R: np.ndarray, N: int, s0: np.ndarray, s_goal: np.ndarray, u_goal: np.ndarray, 
+                  s_warm: np.ndarray, u_warm: np.ndarray, dt: float, quad, tol: float, max_iters: int):
+    """Solve a single MPC sub-problem for the quadrotor trajectory problem."""
+    n = Q.shape[0]
+    m = R.shape[0]
+    s_target = np.zeros((1, n))
+    s_target[0] = s_goal
+    u_target = np.zeros((1,m))
+    u_target[0] = u_goal
+    A_N, B_N, _ = Jacobians(fd, s_target, u_target, dt, quad)
+    A_N[0], B_N[0] = np.array(A_N[0]), np.array(B_N[0])
+    P = solve_discrete_are(A_N[0], B_N[0], Q, R)
+
+    # Initialize nominal (zero control) trajectories from warm values
+    u_bar = u_warm
+    s_bar = s_warm
+    s_bar[0] = s0
+
+    # Do SCP until convergence or maximum number of iterations is reached
+    converged = False
+    obj_prev = np.inf
+    for i in range(max_iters):
+        s, u, obj = scp_iteration(fd, P, Q, R, N, s_bar, u_bar, s_goal, s0, dt, quad)
+        diff_obj = np.abs(obj - obj_prev)
+        #prog_bar.set_postfix({'objective change': '{:.5f}'.format(diff_obj)})
+
+        if diff_obj < tol:
+            converged = True
+            # print('SCP converged after {} iterations.'.format(i))
+            break
+        else:
+            obj_prev = obj
+            np.copyto(s_bar, s)
+            np.copyto(u_bar, u)
+
+    if not converged:
+        raise RuntimeError('SCP did not converge!')
+
+    return s, u
+
+def generate_mpc_trajectory(fd: callable, Q: np.ndarray, R: np.ndarray, s0: np.ndarray, u0: np.ndarray, 
+                            s_bar: np.ndarray, u_bar: np.ndarray, s_goal: np.ndarray, u_goal: np.ndarray,
+                            t: np.ndarray, N: int, dt: float, quad, tol: float, max_iters: int):
+    n = Q.shape[0]
+    m = R.shape[0]
+    # Initialize arrays of true state and control trajectories
+    s = []
+    u = []
+    s.append(np.copy(s0))
+    u.append(np.copy(u0))
+
+    # Time discretized mpc trajectories
+    s_mpc = np.zeros((len(t)+1, N + 1, n))
+    u_mpc = np.zeros((len(t)+1, N, m))
+
+    # Initialize MPC trajectories with reference trajectories
+    s_warm = s_bar[0:N+1]
+    u_warm = u_bar[0:N]
+
+    # perform MPC iterations with warm start
+    prog_bar = tqdm(range(len(t)))
+    for k in prog_bar:
+        # Update state and control trajectory for window k based on warm start from previous window
+        s_mpc[k], u_mpc[k] = mpc_iteration(fd, Q, R, N, s[k], s_goal, u_goal, s_warm, u_warm, dt, quad, tol, max_iters)
+
+        # Update state and control for one time step using mpc control
+        s.append(fd(s[k], u_mpc[k,0,:], dt, quad))
+        u.append(u_mpc[k,0,:])
+
+        # Update warm start trajectories
+        s_warm[0:N] = s_mpc[k][1:N+1]
+        s_warm[-1] = s_mpc[k][-1]
+        u_warm[0:N-1] = u_mpc[k][1:N]
+        u_warm[N-1] = u_mpc[k][-1]
+
+    s = np.array(s)
+    u = np.array(u)
+
+    return s, u
