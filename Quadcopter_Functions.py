@@ -16,7 +16,8 @@ class PlanarQuadrotor:
         self.d = 0.25     # length from center of mass to propellers (m)
         self.g = 9.81     # acceleration due to gravity [m/s^2]
         self.l = 1        # pendulum length (m)
-        
+        self.C_d = 0.
+
         # Control constraints
         self.max_thrust_per_prop = self.m_Q * self.g  # total thrust-to-weight ratio = 1.5
         self.min_thrust_per_prop = 0.
@@ -33,13 +34,12 @@ def LoadedQuadEOM(s: np.ndarray, u: np.ndarray, quad):
     # 7 - phidot
 
     # control input is the left and right propeller thrusts
-    m_Q, m_p, I_yy, d, g, l = quad.m_Q, quad.m_p, quad.Iyy, quad.d, quad.g, quad.l
+    m_Q, m_p, I_yy, d, g, l, C_d = quad.m_Q, quad.m_p, quad.Iyy, quad.d, quad.g, quad.l, quad.C_d
     m_tot = m_Q + m_p
 
     x, z, theta, phi = s[0], s[1], s[2], s[3]
     xdot, zdot, thetadot, phidot = s[4], s[5], s[6], s[7]
     T1, T2 = u
-    C_d = 2
 
     sdot = np.zeros((s.shape[0]))
     sdot[0] = xdot
@@ -62,12 +62,11 @@ def loaded_dynamics(s: np.ndarray, u: np.ndarray, dt: float, quad):
 
 def Jacobians(fd: callable, s: np.ndarray, u: np.ndarray, dt: float, quad):
     '''Accept vector of states and control, and output time discretized jacobian matrices'''
-    m_Q, m_p, I_yy, l, d = quad.m_Q, quad.m_p, quad.Iyy, quad.l, quad.d
+    m_Q, m_p, I_yy, l, d, C_d = quad.m_Q, quad.m_p, quad.Iyy, quad.l, quad.d, quad.C_d
     state_dim = 8
     control_dim = 2
     A_k, B_k, c_k = [], [], []
 
-    C_d = 2
     for k in range(s.shape[0]):
         s_k = s[k]
         u_k = u[k]
@@ -119,31 +118,6 @@ def Jacobians(fd: callable, s: np.ndarray, u: np.ndarray, dt: float, quad):
         c_k.append(fd(s_k, u_k, dt, quad) - A @ s_k - B @ u_k)
 
     return A_k, B_k, c_k
-
-def LQR_Jacobians(s: np.ndarray, u: np.ndarray, dt: float, quad):
-    """Calculate state and control Jacobians around (s*,u*)."""
-    state_dim = s.shape[0]
-    control_dim = u.shape[0]
-    m, Iyy, d = quad.m_Q, quad.Iyy, quad.d
-    x, z, theta, v_x, v_y, omega = s
-    T1, T2 = u
-
-    # derivative wrt state variables
-    df_ds = np.identity(state_dim)
-    df_ds[0:3,3:6] = dt*np.identity(3)
-    df_ds[3,2] = dt*(T1+T2)*np.cos(theta) / m
-    df_ds[4,2] = -dt*(T1+T2)*np.sin(theta) / m
-
-    # derivative wrt control variables
-    df_du = np.zeros((state_dim, control_dim))
-    df_du[3,0] = dt*np.sin(theta) / m
-    df_du[3,1] = dt*np.sin(theta) / m
-    df_du[4,0] = dt*np.cos(theta) / m
-    df_du[4,1] = dt*np.cos(theta) / m
-    df_du[5,0] = dt*d / Iyy
-    df_du[5,1] = -dt*d / Iyy
-
-    return df_ds, df_du
 
 # Generate time discretized control policy using Sequential Convex Programming
 def generate_scp_trajectory(fd: callable, P: np.ndarray, Q: np.ndarray, R: np.ndarray, N: int, 
@@ -226,31 +200,3 @@ def scp_iteration(fd: callable, P: np.ndarray, Q: np.ndarray, R: np.ndarray, N: 
     obj = prob.objective.value
 
     return s, u, obj
-
-# Compute deviation variable gain matrix
-def LQR_tracking_gain(s_goal: np.ndarray, u_goal: np.ndarray, dt: float, quad):
-    # Deviation cost matrices
-    Q_LQR = 1e-3*np.eye(6)  # state deviation cost matrix
-    R_LQR = 1e-3*np.eye(2)  # control deviation cost matrix
-
-    # Initialize cost-to-go matrix to 0
-    P_inf = np.zeros_like(Q_LQR)
-
-    A, B = LQR_Jacobians(s_goal[0:6], u_goal[0:6], dt, quad)
-    # P_next stores P_{k+1} matrix
-    P_next = deepcopy(P_inf)
-    not_converged = True
-    while not_converged:
-        # Ricatti Recursion update step
-        K = -1 * np.linalg.inv(R_LQR + B.T @ P_next @ B) @ B.T @ P_next @ A
-        P = Q_LQR + A.T @ P_next @ (A + B @ K)
-
-        # maximum element-wise norm condition ||P_k+1 - P_k||_max < 1e-4
-        if np.all(np.absolute(P_next - P) < 1e-5):
-            not_converged = False
-
-        # Update cost-to-go matrix for next loop
-        P_next = deepcopy(P)
-
-    # Infinite horizon deviation variable gain matrix
-    return K
